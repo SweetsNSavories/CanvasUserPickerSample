@@ -15,6 +15,38 @@ A Canvas-app reference implementation that mimics the **Outlook / InfoPath peopl
 
 ---
 
+## Install the packaged solution (fastest path)
+
+A ready-to-import **managed solution** is published under [`out/`](out/):
+
+| File | Use it when... |
+|------|----------------|
+| [`out/CanvasUserPickerSample_managed.zip`](out/CanvasUserPickerSample_managed.zip) | You just want to **try the app** in your environment. Imports as locked/managed. |
+| [`out/CanvasUserPickerSample_unmanaged.zip`](out/CanvasUserPickerSample_unmanaged.zip) | You want to **edit / extend** the app in your own solution. Imports as unmanaged. |
+
+### Import via the maker portal
+1. Go to <https://make.powerapps.com> → pick a target environment.
+2. **Solutions** → **Import solution** → browse to the `.zip` → **Next** → **Import**.
+3. After import completes, open the solution → run **CanvasUserPickerSample**.
+4. When prompted, sign in to wire up the **Office 365 Users** connection.
+
+### Import via Power Platform CLI
+```powershell
+# Authenticate against the target env (one-time)
+pac auth create --environment <env-id-or-url>
+
+# Import the managed solution and publish
+pac solution import `
+  --path .\out\CanvasUserPickerSample_managed.zip `
+  --publish-changes
+```
+
+Verify with `pac solution list` — you should see `CanvasUserPickerSample` (publisher prefix `sns`).
+
+> Want to repack from source? See [Layout](#layout) and `pack.ps1`. The exports in `out/` are produced from the **SeaCass** environment via `pac solution export`.
+
+---
+
 ## Layout
 
 ```

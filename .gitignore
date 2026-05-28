@@ -1,5 +1,6 @@
-# Build output
-out/
+# Build output (allow shipped solution exports below)
+out/*
+!out/*.zip
 *.msapp
 
 # Power Platform CLI temp
