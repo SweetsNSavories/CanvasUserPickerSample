@@ -73,7 +73,7 @@
   </div>
   <h1>Building an Outlook-style People Picker in a Canvas App &mdash; live, agent-driven</h1>
   <p class="lead">A field report on driving Power Apps Studio end-to-end through a browser agent, the Power Fx gotchas we hit, and the small workarounds that turned a flaky build into a reliable one.</p>
-  <div class="byline">May 28, 2026 &nbsp;&middot;&nbsp; Environment: <strong>SeaCass</strong> &nbsp;&middot;&nbsp; App: <code>CanvasUserPickerSample</code></div>
+  <div class="byline">May 28, 2026 &nbsp;&middot;&nbsp; App: <code>CanvasUserPickerSample</code></div>
 </header>
 
 <h2 id="goal">The goal</h2>
@@ -96,8 +96,6 @@ Canvas comboboxes <em>can</em> do this, but only when the underlying state is wi
 
 <h2 id="setup">Setup</h2>
 <div class="pill-row">
-  <span class="pill"><strong>Tenant:</strong> pfecrmonline.onmicrosoft.com</span>
-  <span class="pill"><strong>Env:</strong> SeaCass</span>
   <span class="pill"><strong>Form factor:</strong> Tablet</span>
   <span class="pill"><strong>Data:</strong> Office 365 Users connector</span>
 </div>
@@ -227,7 +225,7 @@ After editing <code>OnStart</code>, you have to run it once explicitly: <em>Tree
 
 <h2 id="validation">Validation in Preview</h2>
 <p>
-Press F5. Type a few characters; tenant-directory suggestions appear. Pick one &mdash; a "Clear selection" button shows up next to the chevron, confirming the pick is committed. Clear the search text, type something completely different, pick a second person. Exit preview and look at the Combobox state in the edit canvas: it displays the literal string <code>"alyousse admin, Praveen Thonda"</code>, proving <code>DefaultSelectedItems</code> correctly rehydrates from <code>colPeople</code> across re-renders.
+Press F5. Type a few characters; tenant-directory suggestions appear. Pick one &mdash; a "Clear selection" button shows up next to the chevron, confirming the pick is committed. Clear the search text, type something completely different, pick a second person. Exit preview and look at the Combobox state in the edit canvas: it displays the literal string <code>"Person A, Person B"</code>, proving <code>DefaultSelectedItems</code> correctly rehydrates from <code>colPeople</code> across re-renders.
 </p>
 <p>
 That's the whole picker. No Gallery, no fix-up button, no reorder logic &mdash; just one Combobox with the right wiring.
@@ -262,12 +260,12 @@ The remaining flake is the property-panel re-render: every commit invalidates th
 
 <h2 id="postscript">Postscript &mdash; v1.0.0.1: porting to a second tenant</h2>
 <p>
-We shipped <code>CanvasUserPickerSample</code> v1.0.0.0 as a managed solution and imported it into a second environment (<strong>nyctest</strong>) on a different tenant. The picker connected to Office&nbsp;365 Users fine, the connector returned matches&hellip; and the dropdown rendered <strong>one row labelled &ldquo;San&nbsp;Mateo&rdquo; and a stack of completely blank rows</strong> underneath it.
+We shipped <code>CanvasUserPickerSample</code> v1.0.0.0 as a managed solution and imported it into a second environment on a different tenant. The picker connected to Office&nbsp;365 Users fine, the connector returned matches&hellip; and the dropdown rendered <strong>one row labelled with a single city name and a stack of completely blank rows</strong> underneath it.
 </p>
 
 <div class="callout bad">
   <h4>The actual bug</h4>
-  Somewhere in the build, <code>Combobox1.ItemDisplayText</code> had been left set to <code>ThisItem.City</code> &mdash; a leftover from an early experiment. In our source tenant (SeaCass) this happened to look <em>almost</em> right because a single test user had <code>City = "San Mateo"</code> populated, so the dropdown showed exactly one labelled row and we never noticed. In nyctest, where almost nobody had <code>City</code> set, the same formula collapsed to a wall of blanks.
+  Somewhere in the build, <code>Combobox1.ItemDisplayText</code> had been left set to <code>ThisItem.City</code> &mdash; a leftover from an early experiment. In our source environment this happened to look <em>almost</em> right because a single test user had a <code>City</code> value populated, so the dropdown showed exactly one labelled row and we never noticed. In the target environment, where almost nobody had <code>City</code> set, the same formula collapsed to a wall of blanks.
 </div>
 
 <p>
@@ -305,20 +303,20 @@ The server-side import pipeline runs an <strong>asset-integrity check</strong> a
 The entire fix flow, driven through the same shared browser session:
 </p>
 <ol>
-  <li>Open the app in Power Apps Studio (SeaCass).</li>
+  <li>Open the app in Power Apps Studio (source environment).</li>
   <li>Select <code>Combobox1</code> &rarr; Advanced tab &rarr; <code>ItemDisplayText</code>.</li>
   <li>Replace <code>ThisItem.City</code> with <code>ThisItem.DisplayName &amp; " (" &amp; ThisItem.Mail &amp; ")"</code>.</li>
   <li>Save (Ctrl+S, wait for the &ldquo;Saving&rdquo; progress bar to clear).</li>
   <li>Publish (menubar &rarr; Publish &rarr; <em>Publish this version</em>).</li>
   <li>Bump the solution: <code>pac solution online-version --solution-name CanvasUserPickerSample --solution-version 1.0.0.1</code>.</li>
   <li>Export managed + unmanaged zips: <code>pac solution export --managed</code>.</li>
-  <li>Switch <code>pac</code> auth profile to nyctest. <code>pac solution import</code>. Done.</li>
+  <li>Switch <code>pac</code> auth profile to the target environment. <code>pac solution import</code>. Done.</li>
 </ol>
 <p>
-<code>pac solution list</code> in nyctest shows <code>CanvasUserPickerSample 1.0.0.1 True</code>. The player URL (the canvas <code>appId</code> changes on import &mdash; resolved via the Power Apps Admin API rather than clicking the maker UI&rsquo;s Play button, which doesn&rsquo;t produce a popup in an automated browser session) now shows a clean &ldquo;DisplayName (email)&rdquo; row for every match:
+<code>pac solution list</code> in the target environment shows <code>CanvasUserPickerSample 1.0.0.1 True</code>. The player URL (the canvas <code>appId</code> changes on import &mdash; resolved via the Power Apps Admin API rather than clicking the maker UI&rsquo;s Play button, which doesn&rsquo;t produce a popup in an automated browser session) now shows a clean &ldquo;DisplayName (email)&rdquo; row for every match:
 </p>
-<pre><code>Praveen Thonda (pthonda@pfecrmonline.onmicrosoft.com)
-Praveen Thonda (pravth@microsoft.com)
+<pre><code>Ada Lovelace (ada@contoso.com)
+Alan Turing (alan@contoso.com)
 </code></pre>
 
 <h3>Two small bonus tricks from the porting flow</h3>

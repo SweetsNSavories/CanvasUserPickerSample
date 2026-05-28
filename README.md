@@ -43,7 +43,7 @@ pac solution import `
 
 Verify with `pac solution list` — you should see `CanvasUserPickerSample` (publisher prefix `sns`).
 
-> Want to repack from source? See [Layout](#layout) and `pack.ps1`. The exports in `out/` are produced from the **SeaCass** environment via `pac solution export`.
+> Want to repack from source? See [Layout](#layout) and `pack.ps1`. The exports in `out/` are produced via `pac solution export` from the authoring environment.
 
 ---
 
