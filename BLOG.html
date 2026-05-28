@@ -202,7 +202,7 @@ Set(gblRecipientsCsv, "")</code></pre></td>
   </tr>
   <tr>
     <td><code>Combobox1.ItemDisplayText</code></td>
-    <td><code>ThisItem.DisplayName</code></td>
+    <td><code>ThisItem.DisplayName &amp; " (" &amp; ThisItem.Mail &amp; ")"</code> &nbsp;<em>(see <a href="#postscript">Postscript</a> for why we don't just use <code>ThisItem.DisplayName</code>)</em></td>
   </tr>
   <tr>
     <td><code>Combobox1.InputTextPlaceholder</code></td>
@@ -260,10 +260,77 @@ Three things had to be true for the agent to drive the maker portal reliably:
 The remaining flake is the property-panel re-render: every commit invalidates the previous ref list, so the next action always starts with a fresh <code>read_page</code>. That's tolerable. What isn't tolerable &mdash; and what almost killed this build &mdash; was the main formula bar's residual-state problem. Avoiding it cost nothing once we knew about it.
 </p>
 
+<h2 id="postscript">Postscript &mdash; v1.0.0.1: porting to a second tenant</h2>
+<p>
+We shipped <code>CanvasUserPickerSample</code> v1.0.0.0 as a managed solution and imported it into a second environment (<strong>nyctest</strong>) on a different tenant. The picker connected to Office&nbsp;365 Users fine, the connector returned matches&hellip; and the dropdown rendered <strong>one row labelled &ldquo;San&nbsp;Mateo&rdquo; and a stack of completely blank rows</strong> underneath it.
+</p>
+
+<div class="callout bad">
+  <h4>The actual bug</h4>
+  Somewhere in the build, <code>Combobox1.ItemDisplayText</code> had been left set to <code>ThisItem.City</code> &mdash; a leftover from an early experiment. In our source tenant (SeaCass) this happened to look <em>almost</em> right because a single test user had <code>City = "San Mateo"</code> populated, so the dropdown showed exactly one labelled row and we never noticed. In nyctest, where almost nobody had <code>City</code> set, the same formula collapsed to a wall of blanks.
+</div>
+
+<p>
+Lesson restated: <strong>the source environment lies to you.</strong> If a formula references a field that&rsquo;s sparsely populated, the bug only surfaces when you port the solution to a tenant where the data is shaped differently. Always pick display fields that are <em>guaranteed</em> to be present on every record &mdash; <code>DisplayName</code> and <code>Mail</code> for Office&nbsp;365 Users, not opportunistic profile attributes.
+</p>
+
+<p>The fix was a one-line Power Fx change &mdash; <code>ThisItem.DisplayName &amp; " (" &amp; ThisItem.Mail &amp; ")"</code> &mdash; but actually <em>shipping</em> the fix back into the managed solution turned into its own field-report-worthy detour.</p>
+
+<h3>The failed shortcut: hand-edit the <code>.msapp</code></h3>
+<p>
+The natural impulse was to skip the Studio round-trip entirely:
+</p>
+<ol>
+  <li>Unzip the managed solution.</li>
+  <li>Unzip the embedded <code>app.msapp</code> (it&rsquo;s just a ZIP).</li>
+  <li>Patch the formula in <code>Controls/4.json</code> and <code>Src/Screen1.pa.yaml</code>.</li>
+  <li>Repack the <code>.msapp</code> with .NET&rsquo;s <code>System.IO.Compression.ZipFile</code>.</li>
+  <li>Bump the solution version, repack the outer zip, import.</li>
+</ol>
+<p>
+Every step succeeded locally. The byte-for-byte content was correct. The import failed:
+</p>
+<pre><code>The expected assets file for the canvas app ... is missing or invalid.
+</code></pre>
+<p>
+The server-side import pipeline runs an <strong>asset-integrity check</strong> against the <code>.msapp</code> &mdash; structural hashes / signatures embedded by Studio at bake time that we don&rsquo;t have a documented way to regenerate. Any <code>.msapp</code> that wasn&rsquo;t produced by the Studio bake path is rejected, no matter how syntactically valid its contents are.
+</p>
+<div class="callout bad">
+  <h4>Rule of thumb</h4>
+  <code>.msapp</code> files are an <strong>opaque artifact</strong> for any environment that imports them. Treat them as a build output of Power Apps Studio &mdash; not as a format you can hand-edit and re-import. There is no supported local tool that can re-bake an <code>.msapp</code> the way Studio does.
+</div>
+
+<h3>The path that worked: round-trip through Studio</h3>
+<p>
+The entire fix flow, driven through the same shared browser session:
+</p>
+<ol>
+  <li>Open the app in Power Apps Studio (SeaCass).</li>
+  <li>Select <code>Combobox1</code> &rarr; Advanced tab &rarr; <code>ItemDisplayText</code>.</li>
+  <li>Replace <code>ThisItem.City</code> with <code>ThisItem.DisplayName &amp; " (" &amp; ThisItem.Mail &amp; ")"</code>.</li>
+  <li>Save (Ctrl+S, wait for the &ldquo;Saving&rdquo; progress bar to clear).</li>
+  <li>Publish (menubar &rarr; Publish &rarr; <em>Publish this version</em>).</li>
+  <li>Bump the solution: <code>pac solution online-version --solution-name CanvasUserPickerSample --solution-version 1.0.0.1</code>.</li>
+  <li>Export managed + unmanaged zips: <code>pac solution export --managed</code>.</li>
+  <li>Switch <code>pac</code> auth profile to nyctest. <code>pac solution import</code>. Done.</li>
+</ol>
+<p>
+<code>pac solution list</code> in nyctest shows <code>CanvasUserPickerSample 1.0.0.1 True</code>. The player URL (the canvas <code>appId</code> changes on import &mdash; resolved via the Power Apps Admin API rather than clicking the maker UI&rsquo;s Play button, which doesn&rsquo;t produce a popup in an automated browser session) now shows a clean &ldquo;DisplayName (email)&rdquo; row for every match:
+</p>
+<pre><code>Praveen Thonda (pthonda@pfecrmonline.onmicrosoft.com)
+Praveen Thonda (pravth@microsoft.com)
+</code></pre>
+
+<h3>Two small bonus tricks from the porting flow</h3>
+<ul>
+  <li><strong>Resolving the imported canvas appId without UI.</strong> After import, the canvas <code>appId</code> is regenerated by the target environment. Rather than fishing for it in the maker portal, pull a <code>service.powerapps.com</code> access token out of the active browser&rsquo;s <code>localStorage</code> (any key matching <code>/accesstoken/i</code> and the audience), then call <code>GET https://api.powerapps.com/providers/Microsoft.PowerApps/scopes/admin/environments/{envId}/apps?api-version=2017-08-01</code> with an explicit <code>Authorization: Bearer</code> header. Don&rsquo;t use <code>credentials: 'include'</code> &mdash; you&rsquo;ll trip CORS preflight. The response includes the <code>appPlayUri</code> for each app, ready to navigate.</li>
+  <li><strong>The &ldquo;A new version is available&rdquo; banner.</strong> If the player was open before the new version published, you get a non-blocking banner with a <code>Refresh</code> button. Clicking it is enough; you don&rsquo;t need to dismiss anything else.</li>
+</ul>
+
 <hr/>
 
 <div class="footer-note">
-  Source app committed alongside this post: see <a href="./README.md">README.md</a> for the full reference implementation (Gallery + reorder buttons + PCF discussion) and <a href="./Src/Screens/PeoplePickerScreen.fx.yaml">Src/Screens/PeoplePickerScreen.fx.yaml</a> for the packable Canvas source.
+  Source app committed alongside this post: see <a href="./README.md">README.md</a> for the full reference implementation (Gallery + reorder buttons + PCF discussion) and <a href="./Src/Screens/PeoplePickerScreen.fx.yaml">Src/Screens/PeoplePickerScreen.fx.yaml</a> for the packable Canvas source. The currently shipped managed/unmanaged zips under <a href="./out/">out/</a> are <strong>v1.0.0.1</strong>, baked in Power Apps Studio.
 </div>
 
 </main>
