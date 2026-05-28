@@ -1,0 +1,6 @@
+# Build output
+out/
+*.msapp
+
+# Power Platform CLI temp
+.pac/

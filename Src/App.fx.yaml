@@ -1,0 +1,18 @@
+Properties:
+  OnStart: |
+    =// Seed colPeople so the gallery + combo bind cleanly on first load.
+    ClearCollect(
+        colPeople,
+        {
+            Order: 0,
+            DisplayName: "",
+            Mail: "",
+            JobTitle: "",
+            UserPrincipalName: ""
+        }
+    );
+    Clear(colPeople);
+    Set(gblRecipientsCsv, "")
+
+  StartScreen: =PeoplePickerScreen
+  Theme: =PowerAppsTheme

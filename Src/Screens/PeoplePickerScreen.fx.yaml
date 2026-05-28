@@ -1,0 +1,212 @@
+PeoplePickerScreen As screen:
+  Fill: =RGBA(250, 250, 252, 1)
+
+  lblTitle As label:
+    Text: ="People Picker (Outlook-style)"
+    X: =40
+    Y: =32
+    Width: =Parent.Width - 80
+    Height: =48
+    Size: =22
+    FontWeight: =FontWeight.Semibold
+    Color: =RGBA(32, 31, 30, 1)
+
+  lblSubtitle As label:
+    Text: ="Type to resolve names against Microsoft 365. Reorder the picked list using the arrows."
+    X: =40
+    Y: =84
+    Width: =Parent.Width - 80
+    Height: =28
+    Size: =12
+    Color: =RGBA(96, 94, 92, 1)
+
+  # ------------------------------------------------------------------
+  # ComboBox — the actual people picker.
+  # ------------------------------------------------------------------
+  cmbPeoplePicker As classicCombobox:
+    Items: =Office365Users.SearchUser({searchTerm: Self.SearchText})
+    SelectMultiple: =true
+    IsSearchable: =true
+    SearchFields: =["DisplayName","Mail"]
+    DisplayFields: =["DisplayName","Mail"]
+    DefaultSelectedItems: =colPeople
+    InputTextPlaceholder: ="Search for people…"
+    X: =40
+    Y: =136
+    Width: =Parent.Width - 80
+    Height: =56
+
+    OnChange: |
+      =// 1) Persist current selections into colPeople, keeping any existing Order.
+      ClearCollect(
+          colPeople,
+          ForAll(
+              Self.SelectedItems As _sel,
+              {
+                  Order:
+                      If(
+                          IsBlank(LookUp(colPeople, Mail = _sel.Mail)),
+                          CountRows(colPeople) + 1,
+                          LookUp(colPeople, Mail = _sel.Mail).Order
+                      ),
+                  DisplayName:       _sel.DisplayName,
+                  Mail:              _sel.Mail,
+                  JobTitle:          _sel.JobTitle,
+                  UserPrincipalName: _sel.UserPrincipalName
+              }
+          )
+      );
+
+      // 2) Outlook-style "resolve names" warning when the typed text matches nothing.
+      If(
+          !IsBlank(Self.SearchText)
+              && IsEmpty(
+                  Filter(
+                      Office365Users.SearchUser({searchTerm: Self.SearchText}),
+                      Lower(DisplayName) = Lower(Self.SearchText)
+                          || Lower(Mail) = Lower(Self.SearchText)
+                  )
+              ),
+          Notify(
+              "We couldn't resolve """ & Self.SearchText & """. Pick a suggestion from the list.",
+              NotificationType.Warning,
+              4000
+          )
+      )
+
+  # ------------------------------------------------------------------
+  # Gallery — selected people with reorder + remove.
+  # ------------------------------------------------------------------
+  galSelected As gallery.galleryVertical:
+    Items: =Sort(colPeople, Order, SortOrder.Ascending)
+    X: =40
+    Y: =216
+    Width: =Parent.Width - 80
+    Height: =Parent.Height - 320
+    TemplateSize: =64
+    ShowScrollbar: =true
+    Fill: =RGBA(255, 255, 255, 1)
+    BorderColor: =RGBA(225, 223, 221, 1)
+    BorderThickness: =1
+
+    lblOrder As label:
+      Text: =Text(ThisItem.Order)
+      X: =16
+      Y: =20
+      Width: =32
+      Height: =24
+      Size: =12
+      Color: =RGBA(96, 94, 92, 1)
+      Align: =Align.Center
+
+    lblName As label:
+      Text: =ThisItem.DisplayName & "  •  " & ThisItem.Mail
+      X: =56
+      Y: =12
+      Width: =Parent.TemplateWidth - 240
+      Height: =40
+      Size: =13
+      VerticalAlign: =VerticalAlign.Middle
+      Color: =RGBA(32, 31, 30, 1)
+
+    btnUp As classicButton:
+      Text: ="↑"
+      X: =Parent.TemplateWidth - 168
+      Y: =12
+      Width: =48
+      Height: =40
+      Fill: =RGBA(243, 242, 241, 1)
+      Color: =RGBA(32, 31, 30, 1)
+      OnSelect: |
+        =With(
+            {
+                _curr: ThisItem,
+                _prev: First(
+                    Sort(
+                        Filter(colPeople, Order < ThisItem.Order),
+                        Order,
+                        SortOrder.Descending
+                    )
+                )
+            },
+            If(
+                !IsBlank(_prev),
+                Patch(colPeople, _curr, {Order: _prev.Order});
+                Patch(colPeople, _prev, {Order: _curr.Order})
+            )
+        )
+
+    btnDown As classicButton:
+      Text: ="↓"
+      X: =Parent.TemplateWidth - 112
+      Y: =12
+      Width: =48
+      Height: =40
+      Fill: =RGBA(243, 242, 241, 1)
+      Color: =RGBA(32, 31, 30, 1)
+      OnSelect: |
+        =With(
+            {
+                _curr: ThisItem,
+                _next: First(
+                    Sort(
+                        Filter(colPeople, Order > ThisItem.Order),
+                        Order,
+                        SortOrder.Ascending
+                    )
+                )
+            },
+            If(
+                !IsBlank(_next),
+                Patch(colPeople, _curr, {Order: _next.Order});
+                Patch(colPeople, _next, {Order: _curr.Order})
+            )
+        )
+
+    btnRemove As classicButton:
+      Text: ="✕"
+      X: =Parent.TemplateWidth - 56
+      Y: =12
+      Width: =40
+      Height: =40
+      Fill: =RGBA(232, 17, 35, 1)
+      Color: =RGBA(255, 255, 255, 1)
+      OnSelect: |
+        =Remove(colPeople, ThisItem);
+        // Re-pack Order so the ↑/↓ buttons stay contiguous after a delete.
+        ClearCollect(
+            colPeople,
+            ForAll(
+                Sort(colPeople, Order, SortOrder.Ascending) As _row,
+                Patch(_row, {Order: CountRows(Filter(colPeople, Order < _row.Order)) + 1})
+            )
+        )
+
+  # ------------------------------------------------------------------
+  # Submit button — shows downstream consumption of the ordered list.
+  # ------------------------------------------------------------------
+  btnSubmit As classicButton:
+    Text: ="Submit (build recipients string)"
+    X: =40
+    Y: =Parent.Height - 88
+    Width: =320
+    Height: =48
+    Fill: =RGBA(70, 79, 235, 1)
+    Color: =RGBA(255, 255, 255, 1)
+    DisplayMode: =If(CountRows(colPeople) > 0, DisplayMode.Edit, DisplayMode.Disabled)
+    OnSelect: |
+      =Set(
+          gblRecipientsCsv,
+          Concat(Sort(colPeople, Order), Mail, ";")
+      );
+      Notify("Recipients (in order): " & gblRecipientsCsv, NotificationType.Success)
+
+  lblPreview As label:
+    Text: ="Selected (in order): " & Concat(Sort(colPeople, Order), DisplayName, ", ")
+    X: =380
+    Y: =Parent.Height - 88
+    Width: =Parent.Width - 420
+    Height: =48
+    Size: =11
+    Color: =RGBA(96, 94, 92, 1)
+    VerticalAlign: =VerticalAlign.Middle

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Building an Outlook-style People Picker in a Canvas App — live, agent-driven</title>
+<meta name="description" content="A field report on building a multi-select people picker in Power Apps Studio end-to-end via browser automation, including the Power Fx gotchas we hit and how we routed around them." />
+<style>
+  :root {
+    --bg: #fafaf9;
+    --fg: #1f2328;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --good: #1a7f37;
+    --bad: #cf222e;
+    --code-bg: #f6f8fa;
+    --tag-bg: #ddf4ff;
+    --tag-fg: #0550ae;
+    --shadow: 0 1px 0 rgba(27,31,36,.04), 0 8px 24px rgba(140,149,159,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.post-header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+  .tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tag { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--tag-bg); color: var(--tag-fg); font-weight: 600; letter-spacing: 0.02em; }
+  h1 { font-size: 36px; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .byline { color: var(--muted); font-size: 14px; }
+  h2 { font-size: 24px; margin: 48px 0 14px; padding-top: 12px; border-top: 1px solid var(--border); letter-spacing: -0.005em; }
+  h3 { font-size: 19px; margin: 28px 0 10px; }
+  p { margin: 14px 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  blockquote { border-left: 4px solid var(--accent); margin: 20px 0; padding: 4px 16px; color: var(--muted); background: #f6f8fa; border-radius: 0 6px 6px 0; }
+  code { font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace; font-size: 14px;
+    background: rgba(175,184,193,.2); padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55; box-shadow: var(--shadow); }
+  pre code { background: none; padding: 0; }
+  .callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px;
+    background: #fff; padding: 14px 18px; margin: 24px 0; box-shadow: var(--shadow); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout.good { border-left-color: var(--good); }
+  .callout h4 { margin: 0 0 6px; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  .lead { font-size: 19px; color: var(--muted); margin-top: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+  .footer-note { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+  .pill-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+  .pill { font-size: 13px; padding: 4px 10px; border-radius: 6px; background: #fff; border: 1px solid var(--border); color: var(--muted); }
+  .pill strong { color: var(--fg); }
+  details { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 14px; margin: 14px 0; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details[open] summary { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<main>
+
+<header class="post-header">
+  <div class="tag-row">
+    <span class="tag">Power Apps</span>
+    <span class="tag">Power Fx</span>
+    <span class="tag">Field Notes</span>
+    <span class="tag">Agentic Dev</span>
+  </div>
+  <h1>Building an Outlook-style People Picker in a Canvas App &mdash; live, agent-driven</h1>
+  <p class="lead">A field report on driving Power Apps Studio end-to-end through a browser agent, the Power Fx gotchas we hit, and the small workarounds that turned a flaky build into a reliable one.</p>
+  <div class="byline">May 28, 2026 &nbsp;&middot;&nbsp; Environment: <strong>SeaCass</strong> &nbsp;&middot;&nbsp; App: <code>CanvasUserPickerSample</code></div>
+</header>
+
+<h2 id="goal">The goal</h2>
+<p>
+We wanted a low-code, Outlook / InfoPath style <strong>people picker</strong> inside a Power Apps Canvas app:
+</p>
+<ul>
+  <li>Type a partial name &rarr; live tenant-directory suggestions.</li>
+  <li>Multi-select with checkboxes.</li>
+  <li>Picks <strong>survive</strong> when the user starts a new search &mdash; the classic InfoPath "fix-up" behavior where one wrong name doesn't force re-typing the rest.</li>
+</ul>
+<p>
+Canvas comboboxes <em>can</em> do this, but only when the underlying state is wired correctly. The interesting thing about this build wasn't the Power Fx &mdash; it was that we drove <strong>Power Apps Studio itself</strong> through a browser agent: every click, every formula edit, every save was a tool call.
+</p>
+
+<div class="callout">
+  <h4>TL;DR</h4>
+  Five properties on a single Combobox + a one-line <code>OnStart</code> get you the full Outlook-style picker. The real cost was discovering which surfaces of the Power Apps Studio UI are reliable to automate.
+</div>
+
+<h2 id="setup">Setup</h2>
+<div class="pill-row">
+  <span class="pill"><strong>Tenant:</strong> pfecrmonline.onmicrosoft.com</span>
+  <span class="pill"><strong>Env:</strong> SeaCass</span>
+  <span class="pill"><strong>Form factor:</strong> Tablet</span>
+  <span class="pill"><strong>Data:</strong> Office 365 Users connector</span>
+</div>
+<p>
+We started from a freshly scaffolded local project (<code>README.md</code>, <code>Src/App.fx.yaml</code>, <code>Src/Screens/PeoplePickerScreen.fx.yaml</code>, <code>pack.ps1</code>) with the design and Power Fx already documented. The remaining work was to <strong>actually build the app in the maker portal</strong>, which the agent did live in the VS Code integrated browser.
+</p>
+
+<h2 id="lesson-1">Lesson 1 &mdash; The main formula bar is a trap. Use the Advanced tab.</h2>
+<p>
+Power Apps Studio shows formulas in two places:
+</p>
+<ol>
+  <li>The big <strong>formula bar at the top of the page</strong> &mdash; a single, long-lived Monaco editor instance.</li>
+  <li>Per-property <strong>inline editors</strong> on the right-side <em>Properties &rarr; Advanced</em> tab.</li>
+</ol>
+<p>
+Both render identical-looking Monaco controls. They behave very differently under automation:
+</p>
+<table>
+  <tr><th>Surface</th><th>Behavior when we cleared + typed a new formula</th></tr>
+  <tr><td>Main formula bar (top)</td><td>Residual tokens leak in. <code>clear: true</code> is unreliable. We ended up with half of the previous formula concatenated to the new one.</td></tr>
+  <tr><td>Advanced-tab inline editor</td><td>Spawns a fresh Monaco instance on every property click. <code>clear: true</code> works cleanly. Every typed formula round-tripped without artifacts.</td></tr>
+</table>
+<p>
+This single discovery is what turned the build from frustrating to mechanical. <strong>Once we committed to editing via the Advanced tab</strong>, the agent could set five Combobox properties in a row without a single retry.
+</p>
+<p>
+Committing a formula is just as simple: click <strong>any other property button</strong> on the same panel. The editor blurs, Power Fx revalidates, the error indicator either clears or appears next to the property name, and you can move on.
+</p>
+
+<h2 id="lesson-2">Lesson 2 &mdash; <code>ShowColumns</code> doesn't take strings anymore</h2>
+<p>
+Our first <code>OnChange</code> formula tried to project the Combobox's selected items into a smaller-shape collection:
+</p>
+<pre><code>// FAILS in modern Power Fx with: "Expected identifier name"
+ClearCollect(
+    colPeople,
+    ShowColumns(Self.SelectedItems, "DisplayName", "Mail", "JobTitle", "UserPrincipalName", "Id")
+)
+</code></pre>
+<p>
+Old reference material (and a lot of Stack Overflow) shows <code>ShowColumns</code> with quoted string column names. Modern Power Fx requires <strong>bare identifiers</strong> instead:
+</p>
+<pre><code>ShowColumns(Self.SelectedItems, DisplayName, Mail, JobTitle, UserPrincipalName, Id)
+</code></pre>
+<p>
+But the better fix was to delete <code>ShowColumns</code> entirely &mdash; which leads directly to the next lesson.
+</p>
+
+<h2 id="lesson-3">Lesson 3 &mdash; The schema-inheritance trick for collections</h2>
+<p>
+<code>Combobox.DefaultSelectedItems</code> must be type-compatible with <code>Combobox.Items</code>. If <code>Items</code> returns the full <code>SearchUser</code> record shape but <code>colPeople</code> is a stripped-down 5-field record, you get:
+</p>
+<blockquote>Invalid formula. Expected a value compatible with 'Items'.</blockquote>
+<p>
+Rather than enumerate the exact <code>SearchUser</code> shape (which would couple us to whatever fields Microsoft adds tomorrow), we let the connector tell us its own schema by priming the collection with a no-match call and immediately clearing it:
+</p>
+<pre><code>// App.OnStart
+ClearCollect(
+    colPeople,
+    Office365Users.SearchUser({ searchTerm: "zzznotfound_init_xyz" })
+);
+Clear(colPeople);
+Set(gblRecipientsCsv, "");
+</code></pre>
+<p>
+Now <code>colPeople</code> has the <em>exact</em> shape <code>Items</code> returns. <code>DefaultSelectedItems = colPeople</code> binds without complaint, and <code>OnChange</code> can write <code>Self.SelectedItems</code> back into <code>colPeople</code> directly &mdash; no <code>ShowColumns</code>, no field-by-field rebuild.
+</p>
+<div class="callout good">
+  <h4>Why this matters</h4>
+  Connector return-shapes change. Hand-typed schemas drift. Letting the data source seed your collection's shape removes a whole class of "looks fine, breaks in two months" bugs.
+</div>
+
+<h2 id="lesson-4">Lesson 4 &mdash; The DefaultSelectedItems &harr; OnChange round-trip</h2>
+<p>
+This is the actual mechanism that makes "picks survive a new search" work in a single Combobox:
+</p>
+<ol>
+  <li>User picks Alice. Combobox writes <code>Self.SelectedItems = [Alice]</code>.</li>
+  <li><code>OnChange</code> fires &rarr; <code>ClearCollect(colPeople, Self.SelectedItems)</code>. Now <code>colPeople = [Alice]</code>.</li>
+  <li>User starts typing "bob". <code>Items</code> re-runs with the new search text &mdash; the dropdown now shows Bobs.</li>
+  <li>Internally Power Apps re-evaluates the Combobox. <code>DefaultSelectedItems = colPeople</code> means Alice stays selected even though she's not in the new <code>Items</code> result set.</li>
+  <li>User picks Bob. <code>OnChange</code> fires again &rarr; <code>colPeople = [Alice, Bob]</code>. Done.</li>
+</ol>
+<p>
+Without the collection on both sides of that loop, step&nbsp;4 would silently drop Alice the instant the dropdown refreshed. This is the same dance Outlook does internally; we just expressed it in five lines of Power Fx.
+</p>
+
+<h2 id="final">Final formulas</h2>
+<table>
+  <tr><th>Where</th><th>Formula</th></tr>
+  <tr>
+    <td><code>App.OnStart</code></td>
+    <td><pre style="margin:0"><code>ClearCollect(colPeople,
+  Office365Users.SearchUser({searchTerm: "zzznotfound_init_xyz"}));
+Clear(colPeople);
+Set(gblRecipientsCsv, "")</code></pre></td>
+  </tr>
+  <tr>
+    <td><code>Combobox1.Items</code></td>
+    <td><code>Office365Users.SearchUser({ searchTerm: Self.SearchText })</code></td>
+  </tr>
+  <tr>
+    <td><code>Combobox1.ItemDisplayText</code></td>
+    <td><code>ThisItem.DisplayName</code></td>
+  </tr>
+  <tr>
+    <td><code>Combobox1.InputTextPlaceholder</code></td>
+    <td><code>"Type a name or email..."</code></td>
+  </tr>
+  <tr>
+    <td><code>Combobox1.DefaultSelectedItems</code></td>
+    <td><code>colPeople</code></td>
+  </tr>
+  <tr>
+    <td><code>Combobox1.OnChange</code></td>
+    <td><code>ClearCollect(colPeople, Self.SelectedItems)</code></td>
+  </tr>
+  <tr>
+    <td>Combobox toggles</td>
+    <td><code>SelectMultiple = true</code>, <code>IsSearchable = true</code></td>
+  </tr>
+</table>
+<p>
+After editing <code>OnStart</code>, you have to run it once explicitly: <em>Tree view &rarr; App &rarr; More options &rarr; Run OnStart</em>. Otherwise <code>colPeople</code> doesn't exist yet and <code>DefaultSelectedItems</code> can't bind.
+</p>
+
+<h2 id="validation">Validation in Preview</h2>
+<p>
+Press F5. Type a few characters; tenant-directory suggestions appear. Pick one &mdash; a "Clear selection" button shows up next to the chevron, confirming the pick is committed. Clear the search text, type something completely different, pick a second person. Exit preview and look at the Combobox state in the edit canvas: it displays the literal string <code>"alyousse admin, Praveen Thonda"</code>, proving <code>DefaultSelectedItems</code> correctly rehydrates from <code>colPeople</code> across re-renders.
+</p>
+<p>
+That's the whole picker. No Gallery, no fix-up button, no reorder logic &mdash; just one Combobox with the right wiring.
+</p>
+
+<h2 id="next">What we deliberately left out</h2>
+<p>
+The committed <code>README.md</code> in this repo documents an extended version of the same app with:
+</p>
+<ul>
+  <li>A vertical <strong>Gallery</strong> bound to <code>colPeople</code> for selected-items display.</li>
+  <li><strong>&uarr; / &darr; reorder buttons</strong> using an explicit <code>Order</code> integer column and <code>Patch</code>.</li>
+  <li>A <strong>Submit</strong> button that concatenates emails into <code>gblRecipientsCsv</code>.</li>
+  <li>A short discussion of why true drag/drop reorder requires a <strong>PCF control</strong>.</li>
+</ul>
+<p>
+We built the minimal version live to validate the core mechanism. The Gallery + reorder extensions are pure Power Fx &mdash; they don't require any new automation lessons, so they're left as a copy-paste exercise from the README.
+</p>
+
+<h2 id="agent-meta">Meta: what makes Power Apps Studio agentable</h2>
+<p>
+Three things had to be true for the agent to drive the maker portal reliably:
+</p>
+<ul>
+  <li><strong>Accessible refs.</strong> The studio renders inside an iframe; every interactive element exposes an ARIA label. The agent's browser tool surfaces these as stable <code>refNNN</code> identifiers that survive across <code>read_page</code> snapshots in the same DOM cycle.</li>
+  <li><strong>Per-property editors.</strong> See <a href="#lesson-1">Lesson 1</a>. Without the Advanced tab's fresh-Monaco-per-click pattern, the entire workflow would have devolved into screenshot-driven recovery.</li>
+  <li><strong>A single page, never a new tab.</strong> All studio interaction stayed inside one shared browser page, so the agent could chain <code>read_page</code> &rarr; <code>click_element</code> &rarr; <code>type_in_page</code> without context loss.</li>
+</ul>
+<p>
+The remaining flake is the property-panel re-render: every commit invalidates the previous ref list, so the next action always starts with a fresh <code>read_page</code>. That's tolerable. What isn't tolerable &mdash; and what almost killed this build &mdash; was the main formula bar's residual-state problem. Avoiding it cost nothing once we knew about it.
+</p>
+
+<hr/>
+
+<div class="footer-note">
+  Source app committed alongside this post: see <a href="./README.md">README.md</a> for the full reference implementation (Gallery + reorder buttons + PCF discussion) and <a href="./Src/Screens/PeoplePickerScreen.fx.yaml">Src/Screens/PeoplePickerScreen.fx.yaml</a> for the packable Canvas source.
+</div>
+
+</main>
+</body>
+</html>
